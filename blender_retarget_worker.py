@@ -10,7 +10,7 @@ def retarget(src_fbx, target_rig_fbx, output_fbx, mapping_json_path):
         config = json.load(f)
     bone_map = config.get("bone_map", {})
 
-    # Очистка всей сцены
+    # Очистка сцены
     bpy.ops.wm.read_factory_settings(use_empty=True)
 
     # 1. Загрузка целевого скелета Arma Reforger
@@ -30,7 +30,7 @@ def retarget(src_fbx, target_rig_fbx, output_fbx, mapping_json_path):
         
     target_armature.name = "Arma_Target"
 
-    # 2. Загрузка исходной анимации UE
+    # 2. Загрузка анимации UE
     bpy.ops.import_scene.fbx(filepath=src_fbx)
     
     source_armature = None
@@ -45,10 +45,10 @@ def retarget(src_fbx, target_rig_fbx, output_fbx, mapping_json_path):
         
     source_armature.name = "UE_Source"
 
-    # Выравнивание позиции
+    # Выравнивание положения и масштаба
     source_armature.location = target_armature.location
 
-    # 3. Настройка костей через Copy Transforms в World Space с сохранением структуры
+    # 3. Настройка костей через COPY_ROTATION и COPY_LOCATION
     bpy.context.view_layer.objects.active = target_armature
     bpy.ops.object.mode_set(mode='POSE')
 
@@ -56,33 +56,28 @@ def retarget(src_fbx, target_rig_fbx, output_fbx, mapping_json_path):
         if ref_bone in target_armature.pose.bones and ue_bone in source_armature.pose.bones:
             pbone = target_armature.pose.bones[ref_bone]
             
-            # Очистка
+            # Очистка старых
             for c in pbone.constraints:
                 pbone.constraints.remove(c)
                 
-            # Ставим Copy Transforms для стабильной передачи позы
-            c = pbone.constraints.new('COPY_TRANSFORMS')
-            c.target = source_armature
-            c.subtarget = ue_bone
-            c.target_space = 'WORLD'
-            c.owner_space = 'WORLD'
-            
-            # Для не-корневых костей отключаем копирование масштаба, чтобы меш не рвало
-            if ue_bone.lower() != "pelvis":
-                # Добавляем ограничитель сохранения масштаба
-                limit_scale = pbone.constraints.new('LIMIT_SCALE')
-                limit_scale.use_min_x = True
-                limit_scale.use_min_y = True
-                limit_scale.use_min_z = True
-                limit_scale.use_max_x = True
-                limit_scale.use_max_y = True
-                limit_scale.use_max_z = True
-                limit_scale.min_x = 1.0
-                limit_scale.min_y = 1.0
-                limit_scale.min_z = 1.0
-                limit_scale.max_x = 1.0
-                limit_scale.max_y = 1.0
-                limit_scale.max_z = 1.0
+            if ue_bone.lower() == "pelvis":
+                # Только для таза переносим позицию и вращение
+                c_loc = pbone.constraints.new('COPY_LOCATION')
+                c_loc.target = source_armature
+                c_loc.subtarget = ue_bone
+                
+                c_rot = pbone.constraints.new('COPY_ROTATION')
+                c_rot.target = source_armature
+                c_rot.subtarget = ue_bone
+                c_rot.target_space = 'WORLD'
+                c_rot.owner_space = 'WORLD'
+            else:
+                # Для ВСЕХ остальных костей переносим ТОЛЬКО вращение (Rotation only)
+                c_rot = pbone.constraints.new('COPY_ROTATION')
+                c_rot.target = source_armature
+                c_rot.subtarget = ue_bone
+                c_rot.target_space = 'LOCAL'
+                c_rot.owner_space = 'LOCAL'
 
     # 4. Диапазон кадров
     if source_armature.animation_data and source_armature.animation_data.action:
@@ -95,7 +90,7 @@ def retarget(src_fbx, target_rig_fbx, output_fbx, mapping_json_path):
 
     print(f"[RETARGET] Baking frames {frame_start} to {frame_end}...")
 
-    # 5. Запекание на позу целевого скелета
+    # 5. Запекание (Bake Action)
     bpy.ops.nla.bake(
         frame_start=frame_start,
         frame_end=frame_end,
@@ -109,7 +104,7 @@ def retarget(src_fbx, target_rig_fbx, output_fbx, mapping_json_path):
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.data.objects.remove(source_armature, do_unlink=True)
 
-    # 7. Экспорт чистой анимации со скелетом и мешем
+    # 7. Экспорт
     bpy.ops.object.select_all(action='DESELECT')
     target_armature.select_set(True)
     for m in target_meshes:
