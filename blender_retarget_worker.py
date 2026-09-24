@@ -45,10 +45,13 @@ def retarget(src_fbx, target_rig_fbx, output_fbx, mapping_json_path):
         
     source_armature.name = "UE_Source"
 
-    # Выравнивание положения и масштаба
+    # Выравнивание позиции
     source_armature.location = target_armature.location
 
-    # 3. Настройка костей через COPY_ROTATION и COPY_LOCATION
+    # 3. Настройка костей:
+    # В Arma Reforger оси костей (Local Axes / Roll) отличаются от UE.
+    # В режиме WORLD с mix_mode='BEFORE_FULL' (или WORLD target & owner)
+    # ориентация суставов копируется в реальном мировом пространстве без перекручивания локальных осей.
     bpy.context.view_layer.objects.active = target_armature
     bpy.ops.object.mode_set(mode='POSE')
 
@@ -56,12 +59,11 @@ def retarget(src_fbx, target_rig_fbx, output_fbx, mapping_json_path):
         if ref_bone in target_armature.pose.bones and ue_bone in source_armature.pose.bones:
             pbone = target_armature.pose.bones[ref_bone]
             
-            # Очистка старых
+            # Очистка старых констрейнтов
             for c in pbone.constraints:
                 pbone.constraints.remove(c)
                 
             if ue_bone.lower() == "pelvis":
-                # Только для таза переносим позицию и вращение
                 c_loc = pbone.constraints.new('COPY_LOCATION')
                 c_loc.target = source_armature
                 c_loc.subtarget = ue_bone
@@ -72,12 +74,11 @@ def retarget(src_fbx, target_rig_fbx, output_fbx, mapping_json_path):
                 c_rot.target_space = 'WORLD'
                 c_rot.owner_space = 'WORLD'
             else:
-                # Для ВСЕХ остальных костей переносим ТОЛЬКО вращение (Rotation only)
                 c_rot = pbone.constraints.new('COPY_ROTATION')
                 c_rot.target = source_armature
                 c_rot.subtarget = ue_bone
-                c_rot.target_space = 'LOCAL'
-                c_rot.owner_space = 'LOCAL'
+                c_rot.target_space = 'WORLD'
+                c_rot.owner_space = 'WORLD'
 
     # 4. Диапазон кадров
     if source_armature.animation_data and source_armature.animation_data.action:
