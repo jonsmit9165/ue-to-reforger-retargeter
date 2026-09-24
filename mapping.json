@@ -1,0 +1,75 @@
+{
+  "name": "UE_to_ArmaReforger",
+  "source_engine": "Unreal Engine (UE4/UE5 Mannequin)",
+  "target_engine": "Enfusion Engine (Arma Reforger)",
+  "root_bone": {
+    "source": "Pelvis",
+    "target": "Spine1",
+    "transfer_translation": true
+  },
+  "spine_mapping": {
+    "spine_01": ["Spine1", "Spine2"],
+    "spine_02": ["Spine3", "Spine4"],
+    "spine_03": ["Spine5"]
+  },
+  "bone_map": {
+    "Pelvis": "Spine1",
+    "spine_01": "Spine2",
+    "spine_02": "Spine3",
+    "spine_03": "Spine5",
+    "neck_01": "Neck1",
+    "head": "Head",
+
+    "clavicle_l": "LeftShoulder",
+    "UpperArm_L": "LeftArm",
+    "lowerarm_l": "LeftForeArm",
+    "Hand_L": "LeftHand",
+
+    "clavicle_r": "RightShoulder",
+    "UpperArm_R": "RightArm",
+    "lowerarm_r": "RightForeArm",
+    "Hand_R": "RightHand",
+
+    "Thigh_L": "LeftLeg",
+    "calf_l": "LeftLegTwist",
+    "Foot_L": "LeftFoot",
+    "ball_l": "LeftToe",
+
+    "Thigh_R": "RightLeg",
+    "calf_r": "RightLegTwist",
+    "Foot_R": "RightFoot",
+    "ball_r": "RightToe",
+
+    "thumb_01_l": "LeftHandThumb1",
+    "thumb_02_l": "LeftHandThumb2",
+    "thumb_03_l": "LeftHandThumb3",
+    "index_01_l": "LeftHandIndex1",
+    "index_02_l": "LeftHandIndex2",
+    "index_03_l": "LeftHandIndex3",
+    "middle_01_l": "LeftHandMiddle1",
+    "middle_02_l": "LeftHandMiddle2",
+    "middle_03_l": "LeftHandMiddle3",
+    "ring_01_l": "LeftHandRing1",
+    "ring_02_l": "LeftHandRing2",
+    "ring_03_l": "LeftHandRing3",
+    "pinky_01_l": "LeftHandPinky1",
+    "pinky_02_l": "LeftHandPinky2",
+    "pinky_03_l": "LeftHandPinky3",
+
+    "thumb_01_r": "RightHandThumb1",
+    "thumb_02_r": "RightHandThumb2",
+    "thumb_03_r": "RightHandThumb3",
+    "index_01_r": "RightHandIndex1",
+    "index_02_r": "RightHandIndex2",
+    "index_03_r": "RightHandIndex3",
+    "middle_01_r": "RightHandMiddle1",
+    "middle_02_r": "RightHandMiddle2",
+    "middle_03_r": "RightHandMiddle3",
+    "ring_01_r": "RightHandRing1",
+    "ring_02_r": "RightHandRing2",
+    "ring_03_r": "RightHandRing3",
+    "pinky_01_r": "RightHandPinky1",
+    "pinky_02_r": "RightHandPinky2",
+    "pinky_03_r": "RightHandPinky3"
+  }
+}
