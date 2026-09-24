@@ -13,14 +13,16 @@ class RetargeterApp(ctk.CTk):
         super().__init__()
 
         self.title("UE to Arma Reforger Animation Retargeter")
-        self.geometry("780x620")
-        self.minsize(700, 550)
+        self.geometry("820x660")
+        self.minsize(720, 560)
+
+        # Абсолютные пути по умолчанию рядом со скриптом
+        cur_dir = os.path.dirname(os.path.abspath(__file__))
+        self.target_rig_path = os.path.join(cur_dir, "Start.fbx")
+        self.output_dir = os.path.join(cur_dir, "output_reforger")
 
         self.source_files = []
-        self.target_rig_path = os.path.abspath("Start.fbx")
-        self.output_dir = os.path.abspath("output_reforger")
-
-        self.engine = RetargetEngine("mapping.json")
+        self.engine = RetargetEngine(os.path.join(cur_dir, "mapping.json"))
 
         self.create_ui()
 
@@ -43,7 +45,7 @@ class RetargeterApp(ctk.CTk):
         rig_label = ctk.CTkLabel(cards_frame, text="Целевой скелет Arma Reforger:", font=ctk.CTkFont(weight="bold"))
         rig_label.grid(row=0, column=0, padx=15, pady=(10, 2), sticky="w")
 
-        self.rig_entry = ctk.CTkEntry(cards_frame, width=480)
+        self.rig_entry = ctk.CTkEntry(cards_frame, width=520)
         self.rig_entry.insert(0, self.target_rig_path)
         self.rig_entry.grid(row=1, column=0, padx=15, pady=(0, 10), sticky="ew")
 
@@ -54,7 +56,7 @@ class RetargeterApp(ctk.CTk):
         out_label = ctk.CTkLabel(cards_frame, text="Папка сохранения результатов:", font=ctk.CTkFont(weight="bold"))
         out_label.grid(row=2, column=0, padx=15, pady=(5, 2), sticky="w")
 
-        self.out_entry = ctk.CTkEntry(cards_frame, width=480)
+        self.out_entry = ctk.CTkEntry(cards_frame, width=520)
         self.out_entry.insert(0, self.output_dir)
         self.out_entry.grid(row=3, column=0, padx=15, pady=(0, 15), sticky="ew")
 
@@ -111,7 +113,9 @@ class RetargeterApp(ctk.CTk):
     def add_files(self):
         files = filedialog.askopenfilenames(filetypes=[("FBX files", "*.fbx")])
         if files:
-            self.source_files.extend(files)
+            for f in files:
+                if f not in self.source_files:
+                    self.source_files.append(f)
             self.update_file_list()
 
     def add_folder(self):
@@ -120,7 +124,9 @@ class RetargeterApp(ctk.CTk):
             for root, _, filenames in os.walk(folder):
                 for fn in filenames:
                     if fn.lower().endswith(".fbx"):
-                        self.source_files.append(os.path.join(root, fn))
+                        full_path = os.path.join(root, fn)
+                        if full_path not in self.source_files:
+                            self.source_files.append(full_path)
             self.update_file_list()
 
     def update_file_list(self):
@@ -136,12 +142,17 @@ class RetargeterApp(ctk.CTk):
             messagebox.showwarning("Внимание", "Добавьте хотя бы один FBX-файл с анимацией!")
             return
 
+        self.target_rig_path = self.rig_entry.get()
+        self.output_dir = self.out_entry.get()
+
         self.run_btn.configure(state="disabled")
         threading.Thread(target=self._run_process, daemon=True).start()
 
     def _run_process(self):
         os.makedirs(self.output_dir, exist_ok=True)
         total = len(self.source_files)
+        success_count = 0
+        errors = []
 
         for i, src in enumerate(self.source_files):
             fname = os.path.basename(src)
@@ -156,13 +167,21 @@ class RetargeterApp(ctk.CTk):
 
             try:
                 self.engine.process_file(src, self.target_rig_path, out_path, progress_callback=cb)
+                success_count += 1
             except Exception as e:
-                print(f"Error on {fname}: {e}")
+                err_msg = str(e)
+                print(f"Error on {fname}: {err_msg}")
+                errors.append(f"{fname}: {err_msg}")
 
         self.progress_bar.set(1.0)
-        self.status_label.configure(text=f"✅ Готово! Обработано файлов: {total}")
         self.run_btn.configure(state="normal")
-        messagebox.showinfo("Успех", f"Пакетная конвертация завершена!\nСохранено в: {self.output_dir}")
+
+        if errors:
+            self.status_label.configure(text=f"⚠️ Завершено с ошибками: {len(errors)} из {total}")
+            messagebox.showerror("Ошибка конвертации", "\n\n".join(errors[:3]))
+        else:
+            self.status_label.configure(text=f"✅ Готово! Успешно создано файлов: {success_count}")
+            messagebox.showinfo("Успех", f"Пакетная конвертация завершена!\nУспешно файлов: {success_count}\nПапка: {self.output_dir}")
 
 if __name__ == "__main__":
     app = RetargeterApp()

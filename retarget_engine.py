@@ -1,66 +1,100 @@
 import os
 import sys
-import json
-import numpy as np
-from scipy.spatial.transform import Rotation as R
+import subprocess
+import shutil
 
 class RetargetEngine:
     def __init__(self, mapping_path):
-        with open(mapping_path, 'r', encoding='utf-8') as f:
-            self.config = json.load(f)
-        self.bone_map = self.config.get("bone_map", {})
-        self.spine_map = self.config.get("spine_mapping", {})
-        self.root_config = self.config.get("root_bone", {})
+        self.mapping_path = os.path.abspath(mapping_path)
+        self.blender_executable = self.find_blender()
 
-    def calculate_bone_transform(self, src_rotation_euler, bone_name):
+    def find_blender(self):
         """
-        Пересчёт ориентации и вращения кости с учётом разницы осей UE -> Arma Reforger
+        Автоматический поиск установленного Blender на Windows / Mac / Linux
         """
-        rot = R.from_euler('xyz', src_rotation_euler, degrees=True)
-        
-        # Калибровка осей (Bone roll & coordinate systems)
-        # UE (Z-up, X-forward) vs Enfusion (Y-up / Z-up в зависимости от экспортера)
-        return rot.as_euler('xyz', degrees=True)
+        # 1. Проверяем PATH
+        b = shutil.which("blender")
+        if b:
+            return b
 
-    def interpolate_spine(self, spine_01_rot, spine_02_rot, spine_03_rot):
-        """
-        Интерполяция 3 костей позвоночника UE в 5 костей Arma Reforger
-        """
-        r1 = R.from_euler('xyz', spine_01_rot, degrees=True)
-        r2 = R.from_euler('xyz', spine_02_rot, degrees=True)
-        r3 = R.from_euler('xyz', spine_03_rot, degrees=True)
+        # 2. Стандартные пути на Windows
+        win_paths = [
+            r"C:\Program Files\Blender Foundation\Blender 4.3\blender.exe",
+            r"C:\Program Files\Blender Foundation\Blender 4.2\blender.exe",
+            r"C:\Program Files\Blender Foundation\Blender 4.1\blender.exe",
+            r"C:\Program Files\Blender Foundation\Blender 4.0\blender.exe",
+            r"C:\Program Files\Blender Foundation\Blender 3.6\blender.exe",
+            r"C:\Program Files\Blender Foundation\Blender 3.5\blender.exe",
+            r"C:\Program Files\Blender Foundation\Blender 3.4\blender.exe",
+            r"C:\Program Files\Blender Foundation\Blender 3.3\blender.exe",
+            r"C:\Program Files (x86)\Steam\steamapps\common\Blender\blender.exe",
+            r"D:\Steam\steamapps\common\Blender\blender.exe",
+            r"D:\Program Files\Blender Foundation\Blender 4.2\blender.exe",
+            r"D:\Program Files\Blender Foundation\Blender 4.1\blender.exe",
+            r"D:\Program Files\Blender Foundation\Blender 4.0\blender.exe"
+        ]
+        for p in win_paths:
+            if os.path.exists(p):
+                return p
 
-        # Распределение кривизны позвоночника
-        # Spine1 = 60% spine_01, Spine2 = 40% spine_01 + 30% spine_02
-        # Spine3 = 70% spine_02, Spine4 = 30% spine_02 + 40% spine_03, Spine5 = 60% spine_03
-        s1 = r1 * 0.6
-        s2 = (r1 * 0.4) * (r2 * 0.3)
-        s3 = r2 * 0.7
-        s4 = (r2 * 0.3) * (r3 * 0.4)
-        s5 = r3 * 0.6
+        # 3. Стандартные пути на macOS
+        mac_paths = [
+            "/Applications/Blender.app/Contents/MacOS/Blender",
+            "/Applications/Blender 4.2.app/Contents/MacOS/Blender",
+            "/Applications/Blender 4.1.app/Contents/MacOS/Blender",
+            "/Applications/Blender 4.0.app/Contents/MacOS/Blender",
+            os.path.expanduser("~/Applications/Blender.app/Contents/MacOS/Blender")
+        ]
+        for p in mac_paths:
+            if os.path.exists(p):
+                return p
 
-        return {
-            "Spine1": s1.as_euler('xyz', degrees=True),
-            "Spine2": s2.as_euler('xyz', degrees=True),
-            "Spine3": s3.as_euler('xyz', degrees=True),
-            "Spine4": s4.as_euler('xyz', degrees=True),
-            "Spine5": s5.as_euler('xyz', degrees=True)
-        }
+        return None
 
     def process_file(self, src_fbx_path, target_rig_path, output_fbx_path, progress_callback=None):
-        """
-        Основной цикл ретаргета файла
-        """
-        if not os.path.exists(src_fbx_path):
-            raise FileNotFoundError(f"Source FBX not found: {src_fbx_path}")
-        if not os.path.exists(target_rig_path):
-            raise FileNotFoundError(f"Target rig not found: {target_rig_path}")
+        if not self.blender_executable or not os.path.exists(self.blender_executable):
+            raise RuntimeError(
+                "Blender не найден на компьютере!\n\n"
+                "Для точного ретаргета и экспорта FBX нужен установленный Blender (v3.6+).\n"
+                "Установите Blender или добавьте путь к blender.exe."
+            )
 
-        # Здесь вызывается парсинг ключевых кадров и экспорт в целевой скелет
+        src_fbx = os.path.abspath(src_fbx_path)
+        target_rig = os.path.abspath(target_rig_path)
+        out_fbx = os.path.abspath(output_fbx_path)
+        
+        # Получаем абсолютный путь к worker скрипту рядом с текущим файлом
+        cur_dir = os.path.dirname(os.path.abspath(__file__))
+        script = os.path.join(cur_dir, "blender_retarget_worker.py")
+
         if progress_callback:
-            progress_callback(0.1, "Загрузка скелетов...")
-            progress_callback(0.4, "Ретаргетинг костей и кривых...")
-            progress_callback(0.8, "Запекание ключевых кадров (Bake Action)...")
+            progress_callback(0.2, "Запуск фонового ретаргета в Blender...")
+
+        cmd = [
+            self.blender_executable,
+            "-b",
+            "--factory-startup",
+            "-P", script,
+            "--",
+            src_fbx,
+            target_rig,
+            out_fbx,
+            self.mapping_path
+        ]
+
+        if progress_callback:
+            progress_callback(0.5, "Запекание костей и анимации...")
+
+        res = subprocess.run(cmd, capture_output=True, text=True)
+
+        if res.returncode != 0:
+            print("BLENDER ERROR OUTPUT:\n", res.stderr or res.stdout)
+            raise RuntimeError(f"Ошибка при обработке в Blender:\n{res.stderr or res.stdout}")
+
+        if not os.path.exists(out_fbx):
+            raise RuntimeError(f"Файл не был создан. Лог Blender:\n{res.stdout}")
+
+        if progress_callback:
             progress_callback(1.0, "Готово!")
 
         return True
