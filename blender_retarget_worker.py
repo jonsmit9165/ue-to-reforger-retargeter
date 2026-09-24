@@ -2,6 +2,7 @@ import bpy
 import sys
 import json
 import os
+import mathutils
 
 def retarget(src_fbx, target_rig_fbx, output_fbx, mapping_json_path):
     print(f"[RETARGET] Starting: {src_fbx} -> {output_fbx}")
@@ -10,10 +11,10 @@ def retarget(src_fbx, target_rig_fbx, output_fbx, mapping_json_path):
         config = json.load(f)
     bone_map = config.get("bone_map", {})
 
-    # Очистка сцены
+    # 1. Очистка всей сцены
     bpy.ops.wm.read_factory_settings(use_empty=True)
 
-    # 1. Загрузка целевого скелета Arma Reforger
+    # 2. Импорт целевого скелета Arma Reforger
     bpy.ops.import_scene.fbx(filepath=target_rig_fbx)
     
     target_armature = None
@@ -30,7 +31,7 @@ def retarget(src_fbx, target_rig_fbx, output_fbx, mapping_json_path):
         
     target_armature.name = "Arma_Target"
 
-    # 2. Загрузка анимации UE
+    # 3. Импорт анимации источника UE
     bpy.ops.import_scene.fbx(filepath=src_fbx)
     
     source_armature = None
@@ -45,42 +46,26 @@ def retarget(src_fbx, target_rig_fbx, output_fbx, mapping_json_path):
         
     source_armature.name = "UE_Source"
 
-    # Выравнивание позиции
-    source_armature.location = target_armature.location
-
-    # 3. Настройка костей:
-    # В Arma Reforger оси костей (Local Axes / Roll) отличаются от UE.
-    # В режиме WORLD с mix_mode='BEFORE_FULL' (или WORLD target & owner)
-    # ориентация суставов копируется в реальном мировом пространстве без перекручивания локальных осей.
-    bpy.context.view_layer.objects.active = target_armature
-    bpy.ops.object.mode_set(mode='POSE')
-
+    # Сохраняем исходные матрицы покоя (Rest Pose) для вычисления дельты
+    rest_diff_rotations = {}
+    
     for ue_bone, ref_bone in bone_map.items():
-        if ref_bone in target_armature.pose.bones and ue_bone in source_armature.pose.bones:
-            pbone = target_armature.pose.bones[ref_bone]
+        if ref_bone in target_armature.data.bones and ue_bone in source_armature.data.bones:
+            t_rest_q = target_armature.data.bones[ref_bone].matrix_local.to_quaternion()
+            s_rest_q = source_armature.data.bones[ue_bone].matrix_local.to_quaternion()
             
-            # Очистка старых констрейнтов
-            for c in pbone.constraints:
-                pbone.constraints.remove(c)
-                
-            if ue_bone.lower() == "pelvis":
-                c_loc = pbone.constraints.new('COPY_LOCATION')
-                c_loc.target = source_armature
-                c_loc.subtarget = ue_bone
-                
-                c_rot = pbone.constraints.new('COPY_ROTATION')
-                c_rot.target = source_armature
-                c_rot.subtarget = ue_bone
-                c_rot.target_space = 'WORLD'
-                c_rot.owner_space = 'WORLD'
-            else:
-                c_rot = pbone.constraints.new('COPY_ROTATION')
-                c_rot.target = source_armature
-                c_rot.subtarget = ue_bone
-                c_rot.target_space = 'WORLD'
-                c_rot.owner_space = 'WORLD'
+            # Дельта разницы между базовыми позами в Edit Mode
+            delta = t_rest_q @ s_rest_q.inverted()
+            rest_diff_rotations[ref_bone] = (ue_bone, delta)
 
-    # 4. Диапазон кадров
+    # 4. Создаем Action для анимации на целевом скелете
+    if not target_armature.animation_data:
+        target_armature.animation_data_create()
+
+    target_action = bpy.data.actions.new(name=f"Retarget_{os.path.basename(src_fbx)}")
+    target_armature.animation_data.action = target_action
+
+    # Диапазон кадров
     if source_armature.animation_data and source_armature.animation_data.action:
         act = source_armature.animation_data.action
         frame_start = int(act.frame_range[0])
@@ -89,17 +74,33 @@ def retarget(src_fbx, target_rig_fbx, output_fbx, mapping_json_path):
         frame_start = int(bpy.context.scene.frame_start)
         frame_end = int(bpy.context.scene.frame_end)
 
-    print(f"[RETARGET] Baking frames {frame_start} to {frame_end}...")
+    print(f"[RETARGET] Transferring keyframes with rest offset from {frame_start} to {frame_end}...")
 
-    # 5. Запекание (Bake Action)
-    bpy.ops.nla.bake(
-        frame_start=frame_start,
-        frame_end=frame_end,
-        only_selected=False,
-        visual_keying=True,
-        clear_constraints=True,
-        bake_types={'POSE'}
-    )
+    # 5. Кадровый перенос с компенсацией Rest Pose
+    bpy.context.view_layer.objects.active = target_armature
+    bpy.ops.object.mode_set(mode='POSE')
+
+    for f in range(frame_start, frame_end + 1):
+        bpy.context.scene.frame_set(f)
+        
+        for ref_bone, (ue_bone, delta) in rest_diff_rotations.items():
+            s_pbone = source_armature.pose.bones[ue_bone]
+            t_pbone = target_armature.pose.bones[ref_bone]
+            
+            # Текущее локальное вращение из анимации
+            src_anim_rot = s_pbone.matrix_basis.to_quaternion()
+            
+            # Применяем скорректированное вращение
+            final_rot = delta @ src_anim_rot @ delta.inverted()
+            
+            t_pbone.rotation_mode = 'QUATERNION'
+            t_pbone.rotation_quaternion = final_rot
+            t_pbone.keyframe_insert(data_path="rotation_quaternion", frame=f)
+            
+            # Для таза также переносим смещение
+            if ue_bone.lower() == "pelvis":
+                t_pbone.location = s_pbone.location
+                t_pbone.keyframe_insert(data_path="location", frame=f)
 
     # 6. Удаляем скелет источника
     bpy.ops.object.mode_set(mode='OBJECT')
